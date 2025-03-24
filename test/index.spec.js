@@ -1,20 +1,42 @@
-import { env, createExecutionContext, waitOnExecutionContext, SELF } from 'cloudflare:test';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import worker from '../src';
 
-describe('Hello World worker', () => {
-	it('responds with Hello World! (unit style)', async () => {
-		const request = new Request('http://example.com');
-		// Create an empty context to pass to `worker.fetch()`.
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
-		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+describe('Costs worker', () => {
+	let env;
+    let getRequest;
+
+    beforeAll(() => {
+        env = {
+            monthly_costs: {
+                get: vi.fn(),
+                put: vi.fn()
+            }
+        };
+
+        getRequest = new Request('http://example.com/monthly-costs/get');
+    });
+
+	it('responds with "Endpoint not Found" when wrong endpoint is called', async () => {
+		const request = new Request('http://example.com/wrong-endpoint');
+		const response = await worker.fetch(request, env);
+		const responseText = JSON.parse(await response.text());
+		expect(response.status).toBe(404);
+		expect(responseText.message).toMatchInlineSnapshot(`"Endpoint not Found"`);
 	});
 
-	it('responds with Hello World! (integration style)', async () => {
-		const response = await SELF.fetch('http://example.com');
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+	it('responds with "Key not found" when correct endpoint is called but there is no key stored', async () => {
+		const response = await worker.fetch(getRequest, env);
+		const responseText = JSON.parse(await response.text());
+		expect(response.status).toBe(404);
+		expect(responseText.message).toMatchInlineSnapshot(`"Key not found"`);
+	});
+
+	it('responds with a value when correct endpoint is called and there is a key stored', async () => {
+		const testValue = JSON.stringify({ costs: "test value" });
+		env.monthly_costs.get.mockReturnValue(testValue)
+
+		const response = await worker.fetch(getRequest, env);
+		expect(response.status).toBe(200);
+		expect(await response.text()).toMatchInlineSnapshot(`"${testValue}"`);
 	});
 });
